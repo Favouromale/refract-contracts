@@ -62,6 +62,7 @@ Then `initialize` each contract (admin, USDC token address, and pool↔registry 
 ## Authorization model
 
 - **RefractPool** — `provide_capital`, `withdraw_capital`, and `buy_policy` require the caller's auth. `update_oracle` is admin-only.
+- **RefractPool guardian (fast-path pause)** — the pool stores a `Guardian` address, distinct from the admin/timelock. The guardian's *only* power is to trigger the emergency pause instantly: `set_paused(true)` accepts either the admin/timelock **or** the guardian, with no timelock delay. Unpausing (`set_paused(false)`) is **admin/timelock-only** — a guardian can freeze the protocol fast but cannot unilaterally resume it, so a compromised guardian key is never worse than having none. The guardian role itself is settable/removable **only** through the full governance/timelock (admin) path; a guardian can never grant itself the role or extend its own term. Guardian powers do not extend to any other admin action (e.g. the oracle circuit-breaker clear stays admin/timelock-gated).
 - **RefractOracle** — only registered relayers (or the admin) may `submit`; readings older than 30 minutes are rejected.
 - **RefractPolicyRegistry** — only the registered pool contract or the admin may `register_policy` / `deactivate_policy`.
 
