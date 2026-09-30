@@ -118,6 +118,10 @@ pub enum DataKey {
     ShareToken,               // SEP-41 token contract address for LP shares
     AcceptedTokens,           // Vec<Address> of accepted stablecoins (#80)
     ClaimShortfall(u64),      // policy_id -> i128 shortfall amount (#72)
+    /// #70: Track contract version for migration purposes
+    ContractVersion,
+    /// #71: Total coverage by type to enforce per-type exposure caps
+    TotalCoverageByType(CoverageType),
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -165,6 +169,8 @@ pub enum PolicyStatus {
     Active,
     Claimed,
     Expired,
+    /// #79: Claim initiated but pending dispute window
+    PendingClaim,
 }
 
 #[contracttype]
@@ -180,6 +186,8 @@ pub struct Policy {
     pub end_time: u64,
     pub status: PolicyStatus,
     pub payout_at: Option<u64>,
+    /// #79: When the dispute window closes (PendingClaim only)
+    pub dispute_window_ends_at: Option<u64>,
     pub claim_severity_fraction: Option<u32>, // severity as fraction of 10_000 bps (#74)
     pub payout_amount: Option<i128>, // actual payout after severity/haircut applied (#72, #74)
 }
@@ -192,6 +200,10 @@ pub struct PoolConfig {
     pub min_coverage: i128,         // minimum policy size
     pub max_coverage: i128,         // maximum single policy size
     pub lockup_days: u32,           // LP lockup period in days
+    /// #77: Maximum total coverage a single holder can have across all active policies
+    pub max_holder_coverage: i128,
+    /// #79: Dispute window duration in seconds before claim can be finalized
+    pub dispute_window_secs: u64,
     pub total_loss_threshold_bps: i128, // severity bps where payout reaches 100% (#74)
 }
 
@@ -250,6 +262,8 @@ impl RefractPool {
             min_coverage: 100_000_000i128,    // 10 USDC
             max_coverage: 50_000_000_000i128, // 5,000 USDC
             lockup_days: 7,
+            max_holder_coverage: 500_000_000_000i128, // #77: 50,000 USDC default per holder
+            dispute_window_secs: 86_400,      // #79: 24 hours for disputes
         };
         env.storage().instance().set(&DataKey::PoolConfig, &config);
         env.storage().instance().set(&DataKey::Initialized, &true);
@@ -990,6 +1004,34 @@ impl RefractPool {
 
         env.events()
             .publish((symbol_short!("ORACLE"), coverage_type), (value,));
+        Ok(())
+    }
+
+    // ── Contract Upgrade (#70) ────────────────────────────────────────────────
+
+    /// #70: Admin-gated contract upgrade. Caller supplies the new WASM hash and this
+    /// entrypoint calls env.deployer().update_current_contract_wasm(new_wasm_hash).
+    /// A migrate() hook will be called on the first invocation after upgrade if needed.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: soroban_sdk::BytesN<32>) -> Result<(), PoolError> {
+        Self::require_admin(&env, &caller)?;
+
+        let old_wasm_hash = env.deployer().get_current_contract_wasm().unwrap_or_default();
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Bump contract version for migration tracking
+        let version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractVersion)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractVersion, &(version + 1));
+
+        env.events().publish(
+            (symbol_short!("UPGRADED"),),
+            (old_wasm_hash, new_wasm_hash),
+        );
         Ok(())
     }
 
