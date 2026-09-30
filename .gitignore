@@ -21,6 +21,9 @@ deployments.local.json
 .vscode/*
 !.vscode/extensions.json
 
+# Collected release artefacts (scripts/wasm_manifest.py)
+/dist
+
 # Environment / secrets
 .env
 .env.*
