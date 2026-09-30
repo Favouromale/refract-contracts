@@ -1105,6 +1105,18 @@ fn test_pool_stats_derived_values_with_capital_and_coverage() {
     let provider = funded(&f, 100 * ONE_USDC);
     f.pool.provide_capital(&provider, &(100 * ONE_USDC));
 
+    // Admin sets an extreme lockup_days (e.g. u32::MAX)
+    let mut config = f.pool.pool_config().unwrap();
+    config.lockup_days = u32::MAX;
+    f.pool.set_pool_config(&f.admin, &config);
+
+    // lockup_expires_at should saturate safely without overflowing/panicking
+    let expires = f.pool.lockup_expires_at(&provider).unwrap();
+    assert_eq!(expires, u
+    let f = setup();
+    let provider = funded(&f, 100 * ONE_USDC);
+    f.pool.provide_capital(&provider, &(100 * ONE_USDC));
+
     let stats = f.pool.pool_stats();
     assert_eq!(stats.total_capital, 100 * ONE_USDC);
     assert_eq!(stats.total_shares, 100 * ONE_USDC);
@@ -1137,14 +1149,34 @@ fn test_pool_stats_capacity_clamped_to_zero_when_overutilized() {
     f.pool.provide_capital(&provider, &(100 * ONE_USDC));
 
     let buyer = funded(&f, 10 * ONE_USDC);
-    f.pool.buy_policy(
+    // Buy policy with extreme duration_days: u32::MAX
+    let id = f.pool.buy_policy(
         &buyer,
         &BuyPolicyParams {
             coverage_type: CoverageType::FlightDelay,
-            coverage_amount: 70 * ONE_USDC,
-            duration_days: 30,
+            coverage_amount: 10 * ONE_USDC,
+            duration_days: u32::MAX,
         },
     );
+
+    let policy = f.pool.get_poli
+    let f = setup();
+    let provider = funded(&f, 100 * ONE_USDC);
+    f.pool.provide_capital(&provider, &(100 * ONE_USDC));
+
+    let buyer = funded(&f, 10 * ONE_USDC);
+    // Buy policy with extreme duration_days: u32::MAX
+    let id = f.pool.buy_policy(
+        &buyer,
+        &BuyPolicyParams {
+            coverage_type: CoverageType::FlightDelay,
+            coverage_amount: 10 * ONE_USDC,
+            duration_days: u32::MAX,
+        },
+    );
+
+    let policy = f.pool.get_policy(&id).unwrap();
+    assert_eq!(policy.end_time, u64::MAX);
 
     let mut config = f.pool.pool_config().unwrap();
     config.max_utilization_bps = 5000;
