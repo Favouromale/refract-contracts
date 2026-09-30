@@ -1141,7 +1141,6 @@ fn quote_withdrawal_rejects_more_shares_than_exist() {
     assert_eq!(res, Err(Ok(PoolError::InsufficientShares)));
 }
 
-
 #[test]
 fn test_cross_contract_and_token_transfer_failure_paths() {
     let f = setup();
@@ -1479,5 +1478,4 @@ fn test_quote_withdrawal_more_shares_than_exist() {
     let res = f.pool.try_quote_withdrawal(&(shares + 1));
     assert_eq!(res, Err(Ok(PoolError::InsufficientShares)));
 }
-
 }

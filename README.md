@@ -61,7 +61,8 @@ Then `initialize` each contract (admin, USDC token address, and pool↔registry 
 
 ## Authorization model
 
-- **RefractPool** — `provide_capital`, `withdraw_capital`, and `buy_policy` require the caller's auth. `set_oracle`, `set_policy_registry`, `set_pool_config`, and `set_admin` are admin-only. `process_claim` is permissionless and calls the wired `RefractOracle` contract cross-contract to verify the trigger condition. The former `update_oracle` admin-push shortcut has been removed; trigger state now comes exclusively from the real oracle contract.
+- **RefractPool** — `provide_capital`, `withdraw_capital`, and `buy_policy` require the caller's auth. `set_oracle`, `set_policy_registry`, `set_pool_config`, `set_admin`, and `set_paused` are admin-only. `process_claim` is permissionless and calls the wired `RefractOracle` contract cross-contract to verify the trigger condition. The former `update_oracle` admin-push shortcut has been removed; trigger state now comes exclusively from the real oracle contract.
+  - **Emergency pause.** `set_paused(caller, true)` (admin-only) halts `provide_capital`, `withdraw_capital`, and `buy_policy`, which then return `PoolError::Paused`. `process_claim` and `expire_policy` stay callable while paused so triggered policies are still paid out and lapsed coverage is still freed. Pausing changes no other state (shares, config, LP lockup clocks), so `set_paused(caller, false)` resumes the pool as it was; both calls are idempotent and emit a `PAUSE_SET` event. Read the current state with `paused()`.
 - **RefractOracle** — only registered relayers (or the admin) may `submit`; readings older than 30 minutes are rejected. Consecutive submissions from the same (relayer, feed) pair within 60 seconds are rejected with `SubmittedTooSoon`. `set_feed_metadata` and `update_reputation` are admin-only.
 - **RefractPolicyRegistry** — only the registered pool contract or the admin may `register_policy` / `deactivate_policy`.
 
