@@ -350,6 +350,21 @@ fn pool_contract_reflects_initialize_and_tracks_repointing() {
 
 
 #[test]
+fn test_policy_registry_wasm_artifact_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let pool = Address::generate(&env);
+    let reg_id = env.register_contract(None, RefractPolicyRegistry);
+    let reg = RefractPolicyRegistryClient::new(&env, &reg_id);
+
+    reg.initialize(&admin, &pool);
+    assert_eq!(reg.admin(), Some(admin));
+    assert_eq!(reg.pool_contract(), Some(pool));
+}
+
+#[test]
 fn test_spec_policy_registry_interface_and_error_snapshot() {
     // Pin RegistryError discriminants
     assert_eq!(RegistryError::AlreadyInitialized as u32, 1);
@@ -394,4 +409,5 @@ fn test_spec_policy_registry_interface_and_error_snapshot() {
     };
     assert_eq!(record.policy_id, 1);
     assert!(record.is_active);
+}
 }

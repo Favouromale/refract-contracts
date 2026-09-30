@@ -407,6 +407,19 @@ fn adding_the_same_relayer_twice_is_a_no_op() {
 
 
 #[test]
+fn test_oracle_wasm_artifact_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let oracle_id = env.register_contract(None, RefractOracle);
+    let oracle = RefractOracleClient::new(&env, &oracle_id);
+
+    oracle.initialize(&admin);
+    assert_eq!(oracle.admin(), Some(admin));
+}
+
+#[test]
 fn test_spec_oracle_interface_and_error_snapshot() {
     // Pin OracleError discriminants to catch breaking changes
     assert_eq!(OracleError::AlreadyInitialized as u32, 1);
@@ -427,4 +440,5 @@ fn test_spec_oracle_interface_and_error_snapshot() {
     };
     assert_eq!(sample.value, 10_000_000);
     assert_eq!(sample.updated_at, 1_700_000_000);
+}
 }
