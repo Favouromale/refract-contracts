@@ -102,6 +102,8 @@ pub enum DataKey {
     PreviousOracleData(CoverageType), // previous oracle reading for deviation calc
     CoverageTypeCapital(CoverageType), // capital segmented by coverage type
     ShareToken,               // SEP-41 token contract address for LP shares
+    AcceptedTokens,           // Vec<Address> of accepted stablecoins (#80)
+    ClaimShortfall(u64),      // policy_id -> i128 shortfall amount (#72)
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -124,10 +126,12 @@ pub enum PoolError {
     CapitalLocked = 13, // can't withdraw during a claim event
     PolicyNotYetExpired = 14,
     LockupActive = 15, // can't withdraw until lockup_days have passed since the last deposit
-    CircuitBreakerTripped = 16, // oracle deviation detected, circuit breaker active
-    OracleDeviationExceeded = 17, // oracle reading deviated beyond threshold
-    CoverageTypeCapacityExceeded = 18, // per-coverage-type capacity limit exceeded
-    InvalidShareToken = 19, // share token contract invalid or missing
+    TokenNotAccepted = 16, // token not in accepted list (#80)
+    InsufficientPoolBalance = 17, // pool balance < payout (#72)
+    CircuitBreakerTripped = 18, // oracle deviation detected, circuit breaker active
+    OracleDeviationExceeded = 19, // oracle reading deviated beyond threshold
+    CoverageTypeCapacityExceeded = 20, // per-coverage-type capacity limit exceeded
+    InvalidShareToken = 21, // share token contract invalid or missing
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -161,6 +165,8 @@ pub struct Policy {
     pub end_time: u64,
     pub status: PolicyStatus,
     pub payout_at: Option<u64>,
+    pub claim_severity_fraction: Option<u32>, // severity as fraction of 10_000 bps (#74)
+    pub payout_amount: Option<i128>, // actual payout after severity/haircut applied (#72, #74)
 }
 
 #[contracttype]
@@ -171,6 +177,7 @@ pub struct PoolConfig {
     pub min_coverage: i128,         // minimum policy size
     pub max_coverage: i128,         // maximum single policy size
     pub lockup_days: u32,           // LP lockup period in days
+    pub total_loss_threshold_bps: i128, // severity bps where payout reaches 100% (#74)
 }
 
 #[contracttype]
