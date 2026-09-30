@@ -144,13 +144,21 @@ pub enum PoolError {
     CapitalLocked = 13, // can't withdraw during a claim event
     PolicyNotYetExpired = 14,
     LockupActive = 15, // can't withdraw until lockup_days have passed since the last deposit
-    TokenNotAccepted = 16, // token not in accepted list (#80)
-    InsufficientPoolBalance = 17, // pool balance < payout (#72)
-    CircuitBreakerTripped = 18, // oracle deviation detected, circuit breaker active
-    OracleDeviationExceeded = 19, // oracle reading deviated beyond threshold
-    CoverageTypeCapacityExceeded = 20, // per-coverage-type capacity limit exceeded
-    InvalidShareToken = 21, // share token contract invalid or missing
-    Paused = 22, // admin has halted provide_capital/withdraw_capital/buy_policy
+    /// #78: Policy transfer not allowed (policy not Active, or holder mismatch)
+    CannotTransferPolicy = 16,
+    /// #81: Cannot top-up non-Active policy
+    CannotTopUpPolicy = 17,
+    /// #82: Token transfer resulted in unexpected amount
+    TokenTransferMismatch = 18,
+    /// #84: Recovery amount exceeds safe limit (would dip into LP capital)
+    RecoveryExceedsLimit = 19,
+    TokenNotAccepted = 20, // token not in accepted list (#80)
+    InsufficientPoolBalance = 21, // pool balance < payout (#72)
+    CircuitBreakerTripped = 22, // oracle deviation detected, circuit breaker active
+    OracleDeviationExceeded = 23, // oracle reading deviated beyond threshold
+    CoverageTypeCapacityExceeded = 24, // per-coverage-type capacity limit exceeded
+    InvalidShareToken = 25, // share token contract invalid or missing
+    Paused = 26, // admin has halted provide_capital/withdraw_capital/buy_policy
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
