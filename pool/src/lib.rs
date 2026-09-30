@@ -124,6 +124,10 @@ pub enum DataKey {
     Initialized,
     OracleData(CoverageType), // latest oracle reading per type
     LastDeposit(Address),     // provider → timestamp of their most recent provide_capital()
+    /// Primary oracle contract for feeds
+    OracleContract,
+    /// Issue #95: Fallback oracle for failover on staleness
+    FallbackOracleContract,
     Paused,                   // bool — emergency stop; absent means not paused
     Guardian,                 // circuit breaker guardian address
     OracleDeviationThreshold, // max deviation (bps) before circuit breaker trips

@@ -118,6 +118,9 @@ pub enum OracleError {
     StaleSubmission = 8, // older than the reading already stored for this feed
     NoPendingAdmin = 9,  // Issue #88: no pending admin to accept
     SubmittedTooSoon = 10, // rate-limit: same (relayer, feed_id) within MIN_SUBMISSION_INTERVAL_SECS
+    InsufficientBond = 11,    // Issue #94: relayer bond too low
+    RelayerNotBonded = 12,   // Issue #94: relayer has no stake
+    InvalidSlashAmount = 13, // Issue #94: slash exceeds bond
 }
 
 /// Aggregate health summary for a single oracle feed.
@@ -156,10 +159,15 @@ pub struct OracleReading {
     pub source: Symbol,
 }
 
-/// Structured metadata describing a feed's shape.
-///
-/// Settable by the admin via [`RefractOracle::set_feed_metadata`].
-/// Qu
+/// Issue #94: Relayer bond record
+#[contracttype]
+#[derive(Clone)]
+pub struct RelayerBondRecord {
+    pub relayer: Address,
+    pub bond_amount: i128,
+    pub bonded_at: u64,
+    /// Timestamp after which relayer can unstake
+    pub unstake_available_at: u64,
 }
 
 /// Oracle reading stored on-chain.
@@ -208,6 +216,14 @@ pub enum DataKey {
     Admin,
     Relayers,
     Reading(Symbol),                   // feed_id → OracleReading
+    /// Issue #95: Fallback oracle address for failover on primary staleness
+    FallbackOracle,
+    /// Issue #91: Per-relayer readings for median aggregation
+    RelayerReading(Symbol, Address), // (feed_id, relayer) → OracleReading
+    /// Issue #93: Historical readings per feed
+    ReadingHistory(Symbol), // feed_id → Vec<OracleReading>
+    /// Issue #94: Relayer bond amounts
+    RelayerBond(Address), // relayer → i128
     FeedMetadata(Symbol),              // feed_id → FeedMetadata  (issue #100)
     LastSubmissionAt(Address, Symbol), // (relayer, feed_id) → u64 timestamp  (issue #103)
     RelayerReputation(Address),        // relayer → i128 score  (issue #101)
