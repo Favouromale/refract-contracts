@@ -239,6 +239,10 @@ pub struct PoolConfig {
     pub min_coverage: i128,         // minimum policy size
     pub max_coverage: i128,         // maximum single policy size
     pub lockup_days: u32,           // LP lockup period in days
+    /// Minimum number of active relayers the oracle must report for a feed
+    /// before `process_claim` will proceed.  Set to 0 to disable the health
+    /// gate (useful in tests / single-relayer staging environments).
+    pub min_relayers_for_claim: u32,
     /// #83: Claims above this threshold are vested instead of paid immediately
     pub large_claim_threshold: i128,
     /// #83: Number of days over which large claims vest linearly
@@ -263,6 +267,27 @@ pub struct PoolStats {
     /// rejecting on InsufficientCapacity, i.e. max(0, max_utilization_bps
     /// of total_capital, minus total_coverage already committed).
     pub available_capacity: i128,
+}
+
+// ── Oracle Reading ────────────────────────────────────────────────────────────
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct OracleData {
+    pub value: i128, // current metric (price, percentage change, etc)
+    pub updated_at: u64,
+}
+
+/// Mirror of `RefractOracle::FeedHealth`.  Kept local to avoid a source-level
+/// dependency on the oracle crate (same pattern as `RegistryCoverageType` /
+/// `PolicyRegistration` above).  Fields must match the oracle's definition
+/// exactly so that `#[contracttype]` ABI de-serialisation works across the
+/// contract boundary.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct OracleFeedHealth {
+    pub last_updated_at: u64,
+    pub active_relayer_count: u32,
+    pub recent_rejection_count: u32,
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -311,6 +336,7 @@ impl RefractPool {
             large_claim_vesting_days: 7,
             max_holder_coverage: 500_000_000_000i128, // #77: 50,000 USDC default per holder
             dispute_window_secs: 86_400,      // #79: 24 hours for disputes
+            min_relayers_for_claim: 1,        // require at least 1 relayer by default
         };
         env.storage().instance().set(&DataKey::PoolConfig, &config);
         env.storage().instance().set(&DataKey::Initialized, &true);
@@ -690,11 +716,46 @@ impl RefractPool {
             return Err(PoolError::PolicyExpired);
         }
 
+        // ── Oracle health gate ────────────────────────────────────────────────
+        // If a RefractOracle contract is wired in, consult its aggregate feed
+        // health before trusting any oracle data for this payout.  A feed with
+        // too few active relayers is treated as untrustworthy and the claim is
+        // rejected with OracleUnhealthy so it can be re-submitted once the
+        // feed recovers.  The gate is skipped when no oracle contract is wired
+        // (min_relayers_for_claim == 0 or OracleContract not set) so existing
+        // tests and single-relayer staging environments are unaffected.
+        let config: PoolConfig = env.storage().instance().get(&DataKey::PoolConfig).unwrap();
+        if config.min_relayers_for_claim > 0 {
+            if let Some(oracle_addr) = env
+                .storage()
+                .instance()
+                .get::<DataKey, Address>(&DataKey::OracleContract)
+            {
+                // Mirror feed_id from coverage_type — matches how the oracle
+                // feed is keyed in practice.
+                let feed_id = Self::_coverage_type_to_feed_id(&env, &policy.coverage_type);
+                let health: OracleFeedHealth = env.invoke_contract(
+                    &oracle_addr,
+                    &Symbol::new(&env, "get_feed_health"),
+                    Vec::from_array(&env, [feed_id.into_val(&env)]),
+                );
+                if health.active_relayer_count < config.min_relayers_for_claim {
+                    return Err(PoolError::OracleUnhealthy);
+                }
+            }
+        }
+
         // ── Real oracle cross-contract call (issue #102) ─────────────────────
         // Map the policy's CoverageType to the integer coverage_type the oracle
         // uses for is_triggered(), and derive the canonical feed_id symbol.
         let (coverage_type_u32, feed_id) =
             Self::_coverage_to_oracle_params(&env, &policy.coverage_type);
+
+        // Read oracle data
+        let oracle: Option<OracleData> = env
+            .storage()
+            .instance()
+            .get(&DataKey::OracleData(policy.coverage_type.clone()));
 
         let triggered = match env.storage().instance().get::<DataKey, Address>(&DataKey::OracleContract) {
             None => false, // no oracle wired — conservatively reject
@@ -1078,6 +1139,24 @@ impl RefractPool {
         Ok(())
     }
 
+    /// Wire the pool to a deployed `RefractOracle` contract so that
+    /// `process_claim` can consult its health gate.  Pass `None` to
+    /// disconnect the oracle (disables the health gate, falling back to the
+    /// existing local `OracleData` path).  Admin-only.
+    pub fn set_oracle_contract(
+        env: Env,
+        caller: Address,
+        oracle: Address,
+    ) -> Result<(), PoolError> {
+        Self::require_admin(&env, &caller)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleContract, &oracle);
+        env.events()
+            .publish((symbol_short!("ORA_SET"),), (oracle,));
+        Ok(())
+    }
+
     // ── Contract Upgrade (#70) ────────────────────────────────────────────────
 
     /// #70: Admin-gated contract upgrade. Caller supplies the new WASM hash and this
@@ -1120,7 +1199,6 @@ impl RefractPool {
             .get(&DataKey::TotalCoverage)
             .unwrap_or(0);
         let total_shares: i128 = env
-            .storage()
  
     // ── View Functions ────────────────────────────────────────────────────────
 
@@ -1150,6 +1228,7 @@ impl RefractPool {
                 min_coverage: 0,
                 max_coverage: 0,
                 lockup_days: 0,
+                min_relayers_for_claim: 0,
             });
 
         let utilization_bps = if total_capital == 0 {
@@ -1527,6 +1606,19 @@ impl RefractPool {
             return Err(PoolError::Paused);
         }
         Ok(())
+    }
+
+    /// Map a `CoverageType` to the canonical feed id used by `RefractOracle`
+    /// so the health gate can call `get_feed_health` with the right key.
+    fn _coverage_type_to_feed_id(env: &Env, coverage_type: &CoverageType) -> Symbol {
+        match coverage_type {
+            CoverageType::StablecoinDepeg => Symbol::new(env, "USDC_PRICE"),
+            CoverageType::MarketCrash => Symbol::new(env, "MARKET_24H_RETURN"),
+            CoverageType::LiquidationShield => Symbol::new(env, "LIQUIDATION_RATIO"),
+            CoverageType::SmartContractRisk => Symbol::new(env, "PROTOCOL_TVL"),
+            CoverageType::FlightDelay => Symbol::new(env, "FLIGHT_DELAY"),
+        }
+    }
     }
 
     /// Shared by every admin-gated entrypoint (set_policy_registry,
